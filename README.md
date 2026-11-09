@@ -44,6 +44,22 @@ code edit is not what `ros2 run` flies until rebuilt, and
 `scripts/sheppy_task.sh` refuses `--execute` while `install/` differs from
 `src/`. YAMLs are symlinked under `--symlink-install` and update in place.
 
+## Running the tests
+
+Offline: plain pytest, no running nodes, containers or robot —
+`conftest.py` stands a FakeClient/FakeStore in for the planner and driver
+and sets `RAMMP_BOX_OPENING_VIDEO=0` (no camera video). Source as in Build
+(humble → `~/rammp_deps_ws` → this ws's `install/`), then:
+
+```zsh
+python3 -m pytest src/rammp_box_opening/test -q -p no:launch_testing -p no:launch_ros
+```
+
+`-p no:launch_testing -p no:launch_ros`: pytest 9.1.1 in `~/.local` cannot
+load ROS Humble's launch_testing plugin. `pytest.ini` adds `-p no:anyio`
+(the Jetson's user-site anyio plugin crashes collection). One file:
+`python3 -m pytest src/rammp_box_opening/test/test_container_model.py -q`.
+
 ## Runtime sourcing chain (execution shells)
 
 humble → `~/rammp_deps_ws` → this ws, with
