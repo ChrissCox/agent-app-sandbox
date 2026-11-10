@@ -421,17 +421,19 @@ def test_a_rest_to_rest_interval_averages_under_the_ceiling_too():
     """An interval between two rest samples is timed apart from the profile
     (times_from_profile's triangle, a trapezoid where the cap binds): its
     cap is the ceiling's too, so 1 rad of joint_6 there averages under
-    0.45 rad/s, not under the 1.10 the joint limit alone allows. Averages:
-    the driver's quintic between two rest samples peaks at 15/8 of that
-    (0.77 rad/s here; 1.58 under the joint cap alone, as before this). The
-    mission's lines and turns are sampled every 2-5 mm and the planner's
-    plans densely, and there the quintic follows each interval's speed
-    within a few per cent (1 % on a straight line)."""
+    0.45 rad/s, not under the 1.10 the joint limit alone allows. Nor does
+    it only average under it: the driver's quintic between two rest samples
+    peaks at 15/8 of the average (0.80 rad/s here before the interval was
+    held to 15/8 of chord / cap), so that peak is what stays under 0.45
+    (test_the_executed_speed_stays_under_the_joint_cap_inside_every_interval
+    measures it on the spline)."""
+    from jtc_model import peak_velocity
     src = _traj([[0.0] * 7, [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]])
     out, info = retime_group([src], [1.0], JOINT_VMAX, RetimeParams(qd_ceiling=WRIST_CEILING))
     _, _, t = _arrays(out)
     assert 1.0 / (t[-1] - t[0]) < 0.45
-    assert info["duration_s"] > 1.0 / 0.45
+    assert info["duration_s"] > 15.0 / 8.0 / 0.45 * (1 - 1e-6)
+    assert peak_velocity(out)[0][5] <= 0.45 * (1 + 1e-6)
     assert check_like_executor(out, JOINT_VMAX) == []
 
 
@@ -509,3 +511,113 @@ def test_lines_that_cruise_faster_under_the_junction_ceiling_meet_as_the_slower_
     assert info["duration_s"] < 0.85 * was["duration_s"] and info["stops"] == was["stops"] == 0
     assert np.array_equal(_arrays(held)[0], _arrays(loose)[0])  # positions never touched
     assert check_like_executor(held, JOINT_VMAX) == []
+
+
+# -- the executed speed: the driver's quintic between the samples, not only at them --
+
+
+def test_peak_velocity_of_a_rest_to_rest_interval_is_15_8_of_its_average():
+    """The quintic from rest to rest over chord c in h is the minimum-jerk
+    profile, whose speed peaks at mid-interval at 15/8 c/h — found exactly,
+    not where a coarse sampling happens to land."""
+    from jtc_model import peak_velocity
+
+    chord = np.array([0.0, 0.3, 0.0, 0.0, -0.6, 0.0, 1.0])
+    src = _traj([[0.0] * 7, chord], dt=0.7)
+    per_joint, k, j = peak_velocity(src)
+    h = 0.7  # the stamps 0.7 and 1.4
+    assert per_joint == pytest.approx(15.0 / 8.0 * np.abs(chord) / h, rel=1e-12)
+    assert (k, j) == (0, 6)
+
+
+def _joint_cap(params, vmax=JOINT_VMAX):
+    """The re-timer's own per-joint bound: min(vmax_margin x vmax, qd_ceiling)."""
+    cap = params.vmax_margin * np.asarray(vmax, dtype=float)
+    if params.qd_ceiling is not None:
+        cap = np.minimum(cap, np.asarray(params.qd_ceiling, dtype=float))
+    return cap
+
+
+def _crowded_junction_legs():
+    def crowded_tail(a, b, n_far=20, n_near=12, tail=0.02):
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        d = (b - a) / np.linalg.norm(b - a)
+        return _line(a, b - d * tail, n_far) + _line(b - d * tail, b, n_near)[1:]
+
+    def crowded_head(a, b, n_near=12, n_far=20, head=0.02):
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        d = (b - a) / np.linalg.norm(b - a)
+        return _line(a, a + d * head, n_near) + _line(a + d * head, b, n_far)[1:]
+
+    P1 = [0.4, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    P2 = [0.4 + 0.4 * math.cos(math.radians(60)), 0.4 * math.sin(math.radians(60)), 0, 0, 0, 0, 0]
+    return [_traj(crowded_tail([0.0] * 7, P1)), _traj(crowded_head(P1, P2))]
+
+
+def _compliant(**kw):
+    from rammp_box_opening.constants import COMPLIANT_ACCEL, COMPLIANT_DECEL
+
+    return RetimeParams(accel=COMPLIANT_ACCEL, decel=COMPLIANT_DECEL, qd_ceiling=WRIST_CEILING, **kw)
+
+
+def _speed_cases():
+    from rammp_box_opening.constants import COMPLIANT_FREE_LINE_SPEED, COMPLIANT_JUNCTION_SPEED
+
+    a = _line([0] * 7, [0.4, 0, 0, 0, 0, 0, 0], 30)
+    corner90 = [_traj(a), _traj(_line([0.4, 0, 0, 0, 0, 0, 0], [0.4, 0.4, 0, 0, 0, 0, 0], 30))]
+    reversal = [_traj(a), _traj(_line([0.4, 0, 0, 0, 0, 0, 0], [0.0] * 7, 30))]
+    straight = [_traj(_line([0] * 7, [0.5, 0, 0, 0, 0, 0, 0], 40)),
+                _traj(_line([0.5, 0, 0, 0, 0, 0, 0], [1.0, 0, 0, 0, 0, 0, 0], 40))]
+    walk = _traj(_line([0] * 7, [-1.35, 0.37, 1.2, 0.83, 0.1, -0.63, 0.2], 80))
+    look = _traj(_line([0] * 7, [0.1, 1.2, 0.5, 0.7, 0.3, 1.0, 0.1], 60))
+    arm = _traj(_line([0] * 7, [0.3, 1.2, 0.5, 0.7, 0.0, 0.0, 0.0], 60))
+    cases = {
+        "line": ([_traj(_line([0] * 7, [0.5, -0.3, 0.2, 0.0, 0.4, -0.2, 0.1], 60))], [0.75], RetimeParams()),
+        "line_full": ([_traj(_line([0] * 7, [0.8, 0.6, 0.0, 0.0, 0.5, 0.0, 0.0], 80))], [1.0], RetimeParams()),
+        "two_legs_straight": (straight, [0.75, 0.35], RetimeParams()),
+        "corner_90": (corner90, [0.75, 0.75], RetimeParams()),
+        "corner_60": (_corner_legs(), [0.75, 0.75], RetimeParams()),
+        "reversal": (reversal, [0.75, 0.75], RetimeParams()),
+        "crowded_junction": (_crowded_junction_legs(), [0.75, 0.75], RetimeParams()),
+        "walk_ceiling": ([walk], [0.3], RetimeParams(qd_ceiling=WRIST_CEILING)),
+        "look_ceiling": ([look], [1.0], RetimeParams(qd_ceiling=WRIST_CEILING)),
+        "arm_ceiling": ([arm], [1.0], RetimeParams(qd_ceiling=WRIST_CEILING)),
+        "two_point": ([_traj([[0.0] * 7, [0.1] * 7])], [0.75], RetimeParams()),
+        "rest_to_rest_joint_cap": ([_traj([[0.0] * 7, [0, 0, 0, 0, 0, 0, 1.0]])], [0.75], RetimeParams()),
+        "rest_to_rest_ceiling": ([_traj([[0.0] * 7, [0, 0, 0, 0, 0, 1.0, 0]])], [1.0],
+                                 RetimeParams(qd_ceiling=WRIST_CEILING)),
+    }
+    for ts in (0.5, 0.25, 0.2):
+        cases["corner_60_ts%g" % ts] = (_corner_legs(), [0.75, 0.75], RetimeParams(time_scale=ts))
+        cases["rest_to_rest_ts%g" % ts] = ([_traj([[0.0] * 7, [0, 0, 0, 0, 0, 0, 1.0]])], [0.75],
+                                           RetimeParams(time_scale=ts))
+    # a compliant run always sets its junction ceiling: without it, a joint
+    # that reverses at a 120-140 deg junction is still asked 2-7 % over the
+    # wrist ceiling inside the interval it turns in (offline 2026-11-10)
+    for turn in (132.0, 60.0, 31.5):
+        cases["near_reversal_%g" % turn] = (_near_reversal(turn), [COMPLIANT_FREE_LINE_SPEED] * 2,
+                                            _compliant(junction_cruise=COMPLIANT_JUNCTION_SPEED))
+    # at full speed and no ceiling, the plateau ends at the junction's ease:
+    # 0.9 % over 0.9 x vmax before the accelerations were limited
+    cases["near_reversal_90_full"] = (_near_reversal(90.0), [1.0, 1.0], RetimeParams())
+    return cases
+
+
+_SPEED_CASES = _speed_cases()
+
+
+@pytest.mark.parametrize("name", sorted(_SPEED_CASES))
+def test_the_executed_speed_stays_under_the_joint_cap_inside_every_interval(name):
+    """The driver's quintic between two samples is not the chord: between
+    two rest samples it peaks at 15/8 of the interval's average, and through
+    a corner it bulges. Every joint's executed speed, found exactly on the
+    spline, stays under the re-timer's own cap for it — min(vmax_margin x
+    vmax, qd_ceiling) — anywhere, not only at the samples. The slack is
+    the whole-nanosecond stamps' (stamps.set_stamp)."""
+    from jtc_model import peak_velocity_ratio
+
+    legs, speeds, params = _SPEED_CASES[name]
+    out, _ = retime_group(legs, speeds, JOINT_VMAX, params)
+    ratio, k, j = peak_velocity_ratio(out, _joint_cap(params))
+    print("%s: peak %.4f x cap (interval %d, joint_%d)" % (name, ratio, k, j + 1))
+    assert ratio <= 1.0 + 1e-6, (name, ratio, k, j)
