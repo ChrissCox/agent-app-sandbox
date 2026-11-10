@@ -1,4 +1,5 @@
 import math
+import re
 
 import pytest
 import yaml
@@ -248,3 +249,33 @@ def test_a_bad_scene_detect_block_is_refused_at_load(tmp_path):
         load_press_demo(str(listed))
     none = load_press_demo(_pink_variant(tmp_path, "segmenter_classes: [food container]", "segmenter_classes: []"))
     assert none.segmenter_classes == ()  # an empty list: no segmenter, the OWL alone
+
+
+@pytest.mark.parametrize(
+    "dotted",
+    ["dims", "lid_dims", "button_offset", "press_attitude_rpy_deg", "hover_standoff", "press", "press.touch_nm"],
+)
+def test_a_missing_required_field_is_named_with_the_file_at_load(tmp_path, dotted):
+    raw = yaml.safe_load(open(CFG))
+    *parents, leaf = dotted.split(".")
+    node = raw
+    for p in parents:
+        node = node[p]
+    del node[leaf]
+    broken = tmp_path / "broken.yaml"
+    broken.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError, match=re.escape("%s: missing required field '%s'" % (broken, dotted))):
+        ContainerModel.load(str(broken))
+
+
+def test_an_empty_or_malformed_container_config_is_a_clear_error(tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("")
+    with pytest.raises(ValueError, match=re.escape(str(empty))):
+        ContainerModel.load(str(empty))
+    raw = yaml.safe_load(open(CFG))
+    raw["press"] = 0.5
+    flat = tmp_path / "flat.yaml"
+    flat.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError, match=re.escape(str(flat)) + ".*'press' must be a mapping"):
+        ContainerModel.load(str(flat))

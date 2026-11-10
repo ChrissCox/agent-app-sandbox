@@ -55,6 +55,16 @@ class ContainerModel:
     def load(cls, path):
         with open(path) as f:
             raw = yaml.safe_load(f)
+        # Name the file and the field a broken config lacks, not a bare KeyError
+        if not isinstance(raw, dict):
+            raise ValueError("%s: a container config must be a mapping of fields" % path)
+        for key in ("dims", "lid_dims", "button_offset", "press", "press_attitude_rpy_deg", "hover_standoff"):
+            if key not in raw:
+                raise ValueError("%s: missing required field '%s'" % (path, key))
+        if not isinstance(raw["press"], dict):
+            raise ValueError("%s: field 'press' must be a mapping (with touch_nm)" % path)
+        if "touch_nm" not in raw["press"]:
+            raise ValueError("%s: missing required field 'press.touch_nm'" % path)
         return cls(
             dims=tuple(raw["dims"]),
             lid_dims=tuple(raw["lid_dims"]),
