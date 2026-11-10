@@ -333,6 +333,14 @@ def times_from_profile(v, ds, params, cap=None):
             ramp_len = vpk**2 / (2.0 * a) + vpk**2 / (2.0 * d)
             cruise = np.where(over, (ds[both_rest] - ramp_len) / np.maximum(vpk, 1e-9), 0.0)
             dt[both_rest] = vpk / a + vpk / d + np.maximum(cruise, 0.0)
+            # the driver's quintic between two rest samples is minimum-jerk:
+            # it peaks at 15/8 of the interval's AVERAGE speed, whatever the
+            # triangle or trapezoid timed. A trapezoid averages near the cap,
+            # and its quintic ran 1.44x the joint cap (1 rad of joint_7) and
+            # 1.78x the wrist ceiling (1 rad of joint_6) at mid-interval
+            # (offline 2026-11-10, the spline model test/jtc_model.py), so
+            # the interval is never shorter than 15/8 of chord / cap
+            dt[both_rest] = np.maximum(dt[both_rest], 15.0 / 8.0 * ds[both_rest] / np.maximum(vcap, 1e-9))
         else:
             dt[both_rest] = vpk / a + vpk / d
     dt = dt / _time_scale(params)
@@ -345,7 +353,20 @@ def times_from_profile(v, ds, params, cap=None):
 def to_message(joint_names, positions, t, v=None):
     """Positions as given; velocities from the profile along the local
     tangent (never the central difference of a micro-interval);
-    accelerations by central differences of those; rest at both ends."""
+    accelerations by the limited differences of those; rest at both ends.
+
+    Each joint's acceleration at a sample is the smaller of its two
+    one-sided slopes, and none where they disagree in sign (the velocity's
+    own extreme): the central difference straddles a kink in the speed
+    profile — the ease into or out of a plateau at the cap — and the
+    driver's quintic, leaving a sample at the cap still accelerating, or
+    arriving at one already decelerating, bulged past it inside the
+    interval: 0.8 % over the wrist ceiling on a full-speed look under
+    COMPLIANT_QD_CEILING, 0.9 % over 0.9 x vmax at a full-speed 90 deg
+    junction (offline 2026-11-10, the spline model test/jtc_model.py).
+    Limited, every case test_retime.py re-times stays under its cap; the
+    spline's peak acceleration moved -2.4 % to +7 % (a straight reversal's
+    8.2 -> 8.8 rad/s^2), the crowded junction's 22.9 not at all."""
     n = len(positions)
     vel = np.zeros_like(positions)
     if n > 2:
@@ -357,7 +378,9 @@ def to_message(joint_names, positions, t, v=None):
             vel[1:-1] = chord / norm[:, None] * np.asarray(v)[1:-1, None]
     acc = np.zeros_like(positions)
     if n > 2:
-        acc[1:-1] = (vel[2:] - vel[:-2]) / (t[2:] - t[:-2])[:, None]
+        slope = np.diff(vel, axis=0) / np.diff(t)[:, None]
+        left, right = slope[:-1], slope[1:]
+        acc[1:-1] = np.where(left * right > 0, np.sign(left) * np.minimum(np.abs(left), np.abs(right)), 0.0)
     msg = JointTrajectory()
     msg.joint_names = list(joint_names)
     for k in range(n):
