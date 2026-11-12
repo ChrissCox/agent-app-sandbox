@@ -279,3 +279,41 @@ def test_an_empty_or_malformed_container_config_is_a_clear_error(tmp_path):
     flat.write_text(yaml.safe_dump(raw))
     with pytest.raises(ValueError, match=re.escape(str(flat)) + ".*'press' must be a mapping"):
         ContainerModel.load(str(flat))
+
+
+BAD_SIZES = {
+    "two": [0.1, 0.1],
+    "four": [0.1, 0.1, 0.1, 0.1],
+    "scalar": 0.1,
+    "string": "0.1, 0.1, 0.1",  # would become a tuple of characters
+    "mapping": {"x": 0.1, "y": 0.1, "z": 0.1},
+    "null": None,
+    "str-element": [0.1, "0.1", 0.1],  # a quoted number
+    "bool": [0.1, True, 0.1],  # a bool is an int in Python
+    "zero": [0.1, 0.0, 0.1],
+    "negative": [0.1, -0.1, 0.1],
+    "nan": [0.1, float("nan"), 0.1],
+    "inf": [0.1, float("inf"), 0.1],
+}
+
+
+@pytest.mark.parametrize("field", ["dims", "lid_dims"])
+@pytest.mark.parametrize("bad", list(BAD_SIZES.values()), ids=list(BAD_SIZES))
+def test_a_size_that_is_not_three_positive_numbers_is_named(tmp_path, field, bad):
+    raw = yaml.safe_load(open(CFG))
+    raw[field] = bad
+    broken = tmp_path / "broken.yaml"
+    broken.write_text(yaml.safe_dump(raw))
+    said = "%s: field '%s' must be three positive numbers (got " % (broken, field)
+    with pytest.raises(ValueError, match=re.escape(said)):
+        ContainerModel.load(str(broken))
+
+
+@pytest.mark.parametrize("field", ["dims", "lid_dims"])
+def test_whole_number_sizes_load_as_floats(tmp_path, field):
+    raw = yaml.safe_load(open(CFG))
+    raw[field] = [1, 1, 1]
+    ok = tmp_path / "ok.yaml"
+    ok.write_text(yaml.safe_dump(raw))
+    size = getattr(ContainerModel.load(str(ok)), field)
+    assert size == (1.0, 1.0, 1.0) and all(isinstance(v, float) for v in size)
