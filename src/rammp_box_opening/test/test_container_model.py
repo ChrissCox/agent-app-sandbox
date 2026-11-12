@@ -265,7 +265,15 @@ def test_a_bad_scene_detect_block_is_refused_at_load(tmp_path):
 
 @pytest.mark.parametrize(
     "dotted",
-    ["dims", "lid_dims", "button_offset", "press_attitude_rpy_deg", "hover_standoff", "press", "press.touch_nm"],
+    [
+        pytest.param("dims", id="dims"),
+        pytest.param("lid_dims", id="lid_dims"),
+        pytest.param("button_offset", id="button_offset"),
+        pytest.param("press_attitude_rpy_deg", id="attitude"),
+        pytest.param("hover_standoff", id="hover_standoff"),
+        pytest.param("press", id="press"),
+        pytest.param("press.touch_nm", id="touch_nm"),
+    ],
 )
 def test_a_missing_required_field_is_named_with_the_file_at_load(tmp_path, dotted):
     raw = _raw()
@@ -291,25 +299,33 @@ def test_an_empty_or_malformed_container_config_is_a_clear_error(tmp_path):
         ContainerModel.load(str(flat))
 
 
-BAD_SIZES = {
-    "two": [0.1, 0.1],
-    "four": [0.1, 0.1, 0.1, 0.1],
-    "scalar": 0.1,
-    "string": "0.1, 0.1, 0.1",  # would become a tuple of characters
-    "mapping": {"x": 0.1, "y": 0.1, "z": 0.1},
-    "null": None,
-    "str-element": [0.1, "0.1", 0.1],  # a quoted number
-    "bool": [0.1, True, 0.1],  # a bool is an int in Python
-    "zero": [0.1, 0.0, 0.1],
-    "negative": [0.1, -0.1, 0.1],
-    "nan": [0.1, float("nan"), 0.1],
-    "inf": [0.1, float("inf"), 0.1],
-    "huge": [0.1, 10**400, 0.1],  # a whole number too large for a float
-}
+SIZE_FIELDS = [
+    pytest.param("dims", id="dims"),
+    pytest.param("lid_dims", id="lid_dims"),
+]
+
+BAD_SIZES = [
+    pytest.param([0.1, 0.1], id="two"),
+    pytest.param([0.1, 0.1, 0.1, 0.1], id="four"),
+    pytest.param(0.1, id="scalar"),
+    # a string would become a tuple of characters
+    pytest.param("0.1, 0.1, 0.1", id="string"),
+    pytest.param({"x": 0.1, "y": 0.1, "z": 0.1}, id="mapping"),
+    pytest.param(None, id="null"),
+    pytest.param([0.1, "0.1", 0.1], id="quoted"),
+    # a bool is an int in Python
+    pytest.param([0.1, True, 0.1], id="bool"),
+    pytest.param([0.1, 0.0, 0.1], id="zero"),
+    pytest.param([0.1, -0.1, 0.1], id="negative"),
+    pytest.param([0.1, float("nan"), 0.1], id="nan"),
+    pytest.param([0.1, float("inf"), 0.1], id="inf"),
+    # a whole number too large for a float
+    pytest.param([0.1, 10**400, 0.1], id="huge"),
+]
 
 
-@pytest.mark.parametrize("field", ["dims", "lid_dims"])
-@pytest.mark.parametrize("bad", list(BAD_SIZES.values()), ids=list(BAD_SIZES))
+@pytest.mark.parametrize("field", SIZE_FIELDS)
+@pytest.mark.parametrize("bad", BAD_SIZES)
 def test_a_size_that_is_not_three_positive_numbers_is_named(tmp_path, field, bad):
     raw = _raw()
     raw[field] = bad
@@ -319,7 +335,7 @@ def test_a_size_that_is_not_three_positive_numbers_is_named(tmp_path, field, bad
         ContainerModel.load(str(broken))
 
 
-@pytest.mark.parametrize("field", ["dims", "lid_dims"])
+@pytest.mark.parametrize("field", SIZE_FIELDS)
 def test_whole_number_sizes_load_as_floats(tmp_path, field):
     raw = _raw()
     raw[field] = [1, 1, 1]
