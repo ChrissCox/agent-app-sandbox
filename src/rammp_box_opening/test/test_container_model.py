@@ -222,6 +222,19 @@ def test_the_canister_is_found_by_the_segmenter_as_the_food_container_it_stands_
         assert oxo.segmenter_classes == () and oxo.segmenter_box == "holder"
 
 
+def _raw(cfg=CFG):
+    """A shipped config as loaded YAML, for a test to edit."""
+    with open(cfg) as f:
+        return yaml.safe_load(f)
+
+
+def _written(tmp_path, name, raw):
+    """The edited config written under tmp_path; its path."""
+    p = tmp_path / name
+    p.write_text(yaml.safe_dump(raw))
+    return p
+
+
 def _pink_variant(tmp_path, old, new):
     text = open(PINK).read()
     assert old in text
@@ -241,10 +254,9 @@ def test_a_bad_scene_detect_block_is_refused_at_load(tmp_path):
         load_press_demo(_pink_variant(tmp_path, "segmenter_classes: [food container]", "segmenter_classes: [food container, '']"))
     with pytest.raises(ValueError, match="unknown key"):
         load_press_demo(_pink_variant(tmp_path, "segmenter_classes: [food container]", "segmenter_class: [food container]"))
-    raw = yaml.safe_load(open(PINK))
+    raw = _raw(PINK)
     raw["scene_detect"] = ["food container"]
-    listed = tmp_path / "listed.yaml"
-    listed.write_text(yaml.safe_dump(raw))
+    listed = _written(tmp_path, "listed.yaml", raw)
     with pytest.raises(ValueError, match="must be a mapping"):
         load_press_demo(str(listed))
     none = load_press_demo(_pink_variant(tmp_path, "segmenter_classes: [food container]", "segmenter_classes: []"))
@@ -253,17 +265,24 @@ def test_a_bad_scene_detect_block_is_refused_at_load(tmp_path):
 
 @pytest.mark.parametrize(
     "dotted",
-    ["dims", "lid_dims", "button_offset", "press_attitude_rpy_deg", "hover_standoff", "press", "press.touch_nm"],
+    [
+        pytest.param("dims", id="dims"),
+        pytest.param("lid_dims", id="lid_dims"),
+        pytest.param("button_offset", id="button_offset"),
+        pytest.param("press_attitude_rpy_deg", id="attitude"),
+        pytest.param("hover_standoff", id="hover_standoff"),
+        pytest.param("press", id="press"),
+        pytest.param("press.touch_nm", id="touch_nm"),
+    ],
 )
 def test_a_missing_required_field_is_named_with_the_file_at_load(tmp_path, dotted):
-    raw = yaml.safe_load(open(CFG))
+    raw = _raw()
     *parents, leaf = dotted.split(".")
     node = raw
     for p in parents:
         node = node[p]
     del node[leaf]
-    broken = tmp_path / "broken.yaml"
-    broken.write_text(yaml.safe_dump(raw))
+    broken = _written(tmp_path, "broken.yaml", raw)
     with pytest.raises(ValueError, match=re.escape("%s: missing required field '%s'" % (broken, dotted))):
         ContainerModel.load(str(broken))
 
@@ -273,9 +292,54 @@ def test_an_empty_or_malformed_container_config_is_a_clear_error(tmp_path):
     empty.write_text("")
     with pytest.raises(ValueError, match=re.escape(str(empty))):
         ContainerModel.load(str(empty))
-    raw = yaml.safe_load(open(CFG))
+    raw = _raw()
     raw["press"] = 0.5
-    flat = tmp_path / "flat.yaml"
-    flat.write_text(yaml.safe_dump(raw))
+    flat = _written(tmp_path, "flat.yaml", raw)
     with pytest.raises(ValueError, match=re.escape(str(flat)) + ".*'press' must be a mapping"):
         ContainerModel.load(str(flat))
+
+
+SIZE_FIELDS = [
+    pytest.param("dims", id="dims"),
+    pytest.param("lid_dims", id="lid_dims"),
+]
+
+BAD_SIZES = [
+    pytest.param([0.1, 0.1], id="two"),
+    pytest.param([0.1, 0.1, 0.1, 0.1], id="four"),
+    pytest.param(0.1, id="scalar"),
+    # a string would become a tuple of characters
+    pytest.param("0.1, 0.1, 0.1", id="string"),
+    pytest.param({"x": 0.1, "y": 0.1, "z": 0.1}, id="mapping"),
+    pytest.param(None, id="null"),
+    pytest.param([0.1, "0.1", 0.1], id="quoted"),
+    # a bool is an int in Python
+    pytest.param([0.1, True, 0.1], id="bool"),
+    pytest.param([0.1, 0.0, 0.1], id="zero"),
+    pytest.param([0.1, -0.1, 0.1], id="negative"),
+    pytest.param([0.1, float("nan"), 0.1], id="nan"),
+    pytest.param([0.1, float("inf"), 0.1], id="inf"),
+    # a whole number too large for a float
+    pytest.param([0.1, 10**400, 0.1], id="huge"),
+]
+
+
+@pytest.mark.parametrize("field", SIZE_FIELDS)
+@pytest.mark.parametrize("bad", BAD_SIZES)
+def test_a_size_that_is_not_three_positive_numbers_is_named(tmp_path, field, bad):
+    raw = _raw()
+    raw[field] = bad
+    broken = _written(tmp_path, "broken.yaml", raw)
+    said = "%s: field '%s' must be three positive numbers (got " % (broken, field)
+    with pytest.raises(ValueError, match=re.escape(said)):
+        ContainerModel.load(str(broken))
+
+
+@pytest.mark.parametrize("field", SIZE_FIELDS)
+def test_whole_number_sizes_load_as_floats(tmp_path, field):
+    raw = _raw()
+    raw[field] = [1, 1, 1]
+    ok = _written(tmp_path, "ok.yaml", raw)
+    size = getattr(ContainerModel.load(str(ok)), field)
+    assert size == (1.0, 1.0, 1.0)
+    assert all(isinstance(v, float) for v in size)

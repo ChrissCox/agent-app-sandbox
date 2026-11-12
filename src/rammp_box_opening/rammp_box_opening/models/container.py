@@ -6,6 +6,7 @@ fixed in the world or steered to the target's bearing (press_yaw_steer).
 """
 
 import math
+import sys
 from dataclasses import dataclass
 
 import yaml
@@ -21,6 +22,29 @@ from rammp_box_opening.constants import TRANSIT_SPEED
 class ContainerPose:
     xyz: tuple
     yaw: float
+
+
+def _positive_finite(v):
+    """True for a positive, finite int or float (a bool is not a number here).
+
+    The upper bound refuses inf and a whole number too large for a float
+    without raising; NaN fails both comparisons.
+    """
+    number = isinstance(v, (int, float)) and not isinstance(v, bool)
+    return number and 0 < v <= sys.float_info.max
+
+
+def _size(path, key, value):
+    """A container size from a config: three positive, finite numbers, as floats.
+
+    A short list, a zero or a quoted number would otherwise load and only go
+    wrong later, far from the file; the error names the file and the field.
+    """
+    three = isinstance(value, (list, tuple)) and len(value) == 3
+    if not (three and all(_positive_finite(v) for v in value)):
+        msg = "%s: field '%s' must be three positive numbers (got %r)"
+        raise ValueError(msg % (path, key, value))
+    return tuple(float(v) for v in value)
 
 
 @dataclass(frozen=True)
@@ -55,7 +79,8 @@ class ContainerModel:
     def load(cls, path):
         with open(path) as f:
             raw = yaml.safe_load(f)
-        # Name the file and the field a broken config lacks, not a bare KeyError
+        # Name the file and the field a broken config lacks or gets wrong, not a
+        # bare KeyError or TypeError (or a bad size that loads and fails later)
         if not isinstance(raw, dict):
             raise ValueError("%s: a container config must be a mapping of fields" % path)
         for key in ("dims", "lid_dims", "button_offset", "press", "press_attitude_rpy_deg", "hover_standoff"):
@@ -66,8 +91,8 @@ class ContainerModel:
         if "touch_nm" not in raw["press"]:
             raise ValueError("%s: missing required field 'press.touch_nm'" % path)
         return cls(
-            dims=tuple(raw["dims"]),
-            lid_dims=tuple(raw["lid_dims"]),
+            dims=_size(path, "dims", raw["dims"]),
+            lid_dims=_size(path, "lid_dims", raw["lid_dims"]),
             button_offset=tuple(raw["button_offset"]),
             button_diameter_m=float(raw.get("button_diameter_m", 0.036)),
             touch_nm=float(raw["press"]["touch_nm"]),
