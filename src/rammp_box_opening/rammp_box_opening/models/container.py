@@ -53,6 +53,20 @@ class ContainerModel:
 
     @classmethod
     def load(cls, path):
+        """Build the model from a container config YAML file.
+
+        Raises:
+            OSError: the file cannot be opened (e.g. FileNotFoundError).
+            yaml.YAMLError: the file is not valid YAML.
+            ValueError: the config is not a mapping; one of dims, lid_dims,
+                button_offset, press, press_attitude_rpy_deg, hover_standoff
+                is missing; press is not a mapping; or press.touch_nm is
+                missing. These messages name the file and the field. Also
+                raised, without that naming, when a numeric field holds a
+                string that is not a number.
+            TypeError: a field has the wrong type for its conversion (e.g. a
+                number where a list is expected, or a list where a number is).
+        """
         with open(path) as f:
             raw = yaml.safe_load(f)
         # Name the file and the field a broken config lacks, not a bare KeyError
