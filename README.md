@@ -236,3 +236,4 @@ reach-out and its lid off are tested offline (`test/test_reach_press.py`,
 and planner — rebuild and run it after any client, runner or CLI change. It
 keeps its run logs in its own work folder (`RAMMP_BOX_OPENING_STATE`), never
 beside the bench's in `~/.ros/rammp_box_opening`.
+
